@@ -1,7 +1,7 @@
-// components/Navbar.tsx
 import React, { useState } from "react";
 import { Ticket, Menu, X } from "lucide-react";
 import ConnectWallet from "./wallet-connect";
+
 export default function Navbar() {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
 
@@ -43,7 +43,7 @@ export default function Navbar() {
 
           {/* Wallet Connection - Desktop */}
           <div className="hidden md:flex items-center space-x-4">
-            <ConnectWallet /> {/* ✅ Use the component */}
+            <ConnectWallet />
           </div>
 
           {/* Mobile menu button */}
@@ -87,7 +87,7 @@ export default function Navbar() {
                 Events
               </a>
               <div className="px-4 pt-4 border-t border-gray-200">
-                <ConnectWallet /> 
+                <ConnectWallet />
               </div>
             </div>
           </div>
