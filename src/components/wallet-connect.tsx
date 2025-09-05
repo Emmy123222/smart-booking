@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { Alert, AlertDescription } from '@/components/ui/alert';
-import { showConnect, UserSession, AppConfig } from '@stacks/connect';
+import { openConnect, UserSession, AppConfig } from '@stacks/connect';
 import { Wallet, LogOut, ExternalLink, AlertCircle } from 'lucide-react';
 
 // Configure Stacks connection
@@ -41,7 +41,7 @@ export default function WalletConnect() {
     setError(null);
 
     try {
-      showConnect({
+      openConnect({
         appDetails: {
           name: 'StacksEvents',
           icon: window.location.origin + '/vite.svg',
