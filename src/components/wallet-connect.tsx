@@ -1,8 +1,11 @@
 import { useState, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { Alert, AlertDescription } from '@/components/ui/alert';
-import { showConnect } from '@stacks/connect';
 import { Wallet, LogOut, ExternalLink, AlertCircle } from 'lucide-react';
+import { AppConfig, UserSession, showConnect } from '@stacks/connect';
+
+const appConfig = new AppConfig(['store_write', 'publish_data']);
+const userSession = new UserSession({ appConfig });
 
 export default function WalletConnect() {
   const [isSignedIn, setIsSignedIn] = useState(false);
@@ -11,17 +14,21 @@ export default function WalletConnect() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    // Check if user is already signed in by looking for stored data
-    const checkAuthStatus = () => {
+    const checkAuthStatus = async () => {
       try {
-        const storedUserData = localStorage.getItem('stacks-user-data');
-        if (storedUserData) {
-          const userData = JSON.parse(storedUserData);
+        // Check if user is already signed in
+        if (userSession.isSignInPending()) {
+          const userData = await userSession.handlePendingSignIn();
+          setUserData(userData);
+          setIsSignedIn(true);
+        } else if (userSession.isUserSignedIn()) {
+          const userData = userSession.loadUserData();
           setUserData(userData);
           setIsSignedIn(true);
         }
       } catch (error) {
         console.error('Error checking auth status:', error);
+        setError('Error checking authentication status');
       } finally {
         setIsLoading(false);
       }
@@ -30,81 +37,75 @@ export default function WalletConnect() {
     checkAuthStatus();
   }, []);
 
+  const checkWalletAvailability = () => {
+    // Check for Hiro Wallet
+    const hasHiro = !!(window as any).StacksProvider;
+    
+    // Check for Xverse
+    const hasXverse = !!(window as any).XverseProviders?.StacksProvider;
+    
+    // Check for Leather
+    const hasLeather = !!(window as any).btc || !!(window as any).LeatherProvider;
+
+    console.log('Wallet detection:', { hasHiro, hasXverse, hasLeather });
+
+    return {
+      hasAnyWallet: hasHiro || hasXverse || hasLeather,
+      wallets: { hasHiro, hasXverse, hasLeather }
+    };
+  };
+
   const handleConnect = async () => {
     setIsLoading(true);
     setError(null);
 
     try {
-      // Debug to see what showConnect expects
-      console.log('showConnect function:', showConnect);
+      const walletCheck = checkWalletAvailability();
       
-      // Try different parameter patterns based on common versions
-      if (typeof showConnect === 'function') {
-        // Option 1: Try with appDetails (older versions)
-        try {
-          showConnect({
-            appDetails: {
-              name: 'StacksEvents',
-              icon: window.location.origin + '/vite.svg',
-            },
-            redirectTo: '/',
-            onFinish: (payload: any) => {
-              console.log('Connection finished:', payload);
-              // Store user data in localStorage
-              if (payload.userSession && payload.userSession.loadUserData) {
-                const userData = payload.userSession.loadUserData();
-                localStorage.setItem('stacks-user-data', JSON.stringify(userData));
-                setUserData(userData);
-                setIsSignedIn(true);
-              }
-              setIsLoading(false);
-            },
-            onCancel: () => {
-              setIsLoading(false);
-              setError('Connection cancelled');
-            },
-          } as any); // Use type assertion to bypass type checking
-        } catch (e) {
-          console.log('Trying alternative parameter format...');
-          
-          // Option 2: Try with different parameter names (newer versions)
-          showConnect({
-            name: 'StacksEvents',
-            icon: window.location.origin + '/vite.svg',
-            redirectTo: '/',
-            onFinish: (payload: any) => {
-              console.log('Connection finished:', payload);
-              if (payload.authResponse && payload.authResponse.length > 0) {
-                // Store basic connection info
-                localStorage.setItem('stacks-wallet-connected', 'true');
-                setUserData({ connected: true });
-                setIsSignedIn(true);
-              }
-              setIsLoading(false);
-            },
-            onCancel: () => {
-              setIsLoading(false);
-              setError('Connection cancelled');
-            },
-          } as any);
-        }
-      } else {
-        throw new Error('showConnect is not available');
+      if (!walletCheck.hasAnyWallet) {
+        setError('No Stacks wallet detected. Please install Hiro Wallet, Xverse, or Leather.');
+        setIsLoading(false);
+        return;
       }
+
+      // Use showConnect with proper configuration
+      showConnect({
+        appDetails: {
+          name: 'StacksEvents',
+          icon: `${window.location.origin}/vite.svg`,
+        },
+        redirectTo: window.location.origin,
+        onFinish: (authData: any) => {
+          console.log('Authentication successful:', authData);
+          
+          // The user session should now be signed in
+          if (userSession.isUserSignedIn()) {
+            const userData = userSession.loadUserData();
+            setUserData(userData);
+            setIsSignedIn(true);
+          }
+          setIsLoading(false);
+        },
+        onCancel: () => {
+          console.log('Authentication cancelled');
+          setIsLoading(false);
+        },
+        userSession: userSession,
+      });
+
     } catch (error) {
       console.error('Error connecting wallet:', error);
-      setError('Failed to connect wallet. Please ensure a Stacks wallet (e.g., Hiro Wallet) is installed.');
+      setError('Failed to connect wallet. Please try again.');
       setIsLoading(false);
     }
   };
 
   const handleSignOut = () => {
-    // Clear all stored data
-    localStorage.removeItem('stacks-user-data');
-    localStorage.removeItem('stacks-wallet-connected');
+    userSession.signUserOut();
     setIsSignedIn(false);
     setUserData(null);
     setError(null);
+    // Reload to clear any cached state
     window.location.reload();
   };
 
@@ -122,10 +123,9 @@ export default function WalletConnect() {
     );
   }
 
-  if (isSignedIn) {
-    const address = userData?.profile?.stxAddress?.testnet || 
-                    userData?.profile?.stxAddress?.mainnet ||
-                    (userData.connected ? 'Connected' : '');
+  if (isSignedIn && userData) {
+    const address = userData.profile?.stxAddress?.testnet || 
+                    userData.profile?.stxAddress?.mainnet || '';
 
     return (
       <div className="flex items-center gap-2">
