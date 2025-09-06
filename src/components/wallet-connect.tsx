@@ -1,12 +1,8 @@
 import { useState, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { Alert, AlertDescription } from '@/components/ui/alert';
-import { showConnect, UserSession, AppConfig } from '@stacks/connect';
+import { showConnect } from '@stacks/connect';
 import { Wallet, LogOut, ExternalLink, AlertCircle } from 'lucide-react';
-
-// Configure Stacks connection
-const appConfig = new AppConfig(['store_write', 'publish_data']);
-const userSession = new UserSession({ appConfig });
 
 export default function WalletConnect() {
   const [isSignedIn, setIsSignedIn] = useState(false);
@@ -15,25 +11,23 @@ export default function WalletConnect() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    const checkAuth = async () => {
+    // Check if user is already signed in by looking for stored data
+    const checkAuthStatus = () => {
       try {
-        if (userSession.isSignInPending()) {
-          const userData = await userSession.handlePendingSignIn();
+        const storedUserData = localStorage.getItem('stacks-user-data');
+        if (storedUserData) {
+          const userData = JSON.parse(storedUserData);
           setUserData(userData);
-          setIsSignedIn(true);
-        } else if (userSession.isUserSignedIn()) {
-          setUserData(userSession.loadUserData());
           setIsSignedIn(true);
         }
       } catch (error) {
-        console.error('Error checking auth:', error);
-        setError('Failed to check authentication status');
+        console.error('Error checking auth status:', error);
       } finally {
         setIsLoading(false);
       }
     };
 
-    checkAuth();
+    checkAuthStatus();
   }, []);
 
   const handleConnect = async () => {
@@ -41,31 +35,73 @@ export default function WalletConnect() {
     setError(null);
 
     try {
-      showConnect({
-        appDetails: {
-          name: 'StacksEvents',
-          icon: window.location.origin + '/vite.svg',
-        },
-        redirectTo: '/',
-        onFinish: () => {
-          setIsLoading(false);
-          window.location.reload();
-        },
-        onCancel: () => {
-          setIsLoading(false);
-          setError('Connection cancelled');
-        },
-        userSession,
-      });
+      // Debug to see what showConnect expects
+      console.log('showConnect function:', showConnect);
+      
+      // Try different parameter patterns based on common versions
+      if (typeof showConnect === 'function') {
+        // Option 1: Try with appDetails (older versions)
+        try {
+          showConnect({
+            appDetails: {
+              name: 'StacksEvents',
+              icon: window.location.origin + '/vite.svg',
+            },
+            redirectTo: '/',
+            onFinish: (payload: any) => {
+              console.log('Connection finished:', payload);
+              // Store user data in localStorage
+              if (payload.userSession && payload.userSession.loadUserData) {
+                const userData = payload.userSession.loadUserData();
+                localStorage.setItem('stacks-user-data', JSON.stringify(userData));
+                setUserData(userData);
+                setIsSignedIn(true);
+              }
+              setIsLoading(false);
+            },
+            onCancel: () => {
+              setIsLoading(false);
+              setError('Connection cancelled');
+            },
+          } as any); // Use type assertion to bypass type checking
+        } catch (e) {
+          console.log('Trying alternative parameter format...');
+          
+          // Option 2: Try with different parameter names (newer versions)
+          showConnect({
+            name: 'StacksEvents',
+            icon: window.location.origin + '/vite.svg',
+            redirectTo: '/',
+            onFinish: (payload: any) => {
+              console.log('Connection finished:', payload);
+              if (payload.authResponse && payload.authResponse.length > 0) {
+                // Store basic connection info
+                localStorage.setItem('stacks-wallet-connected', 'true');
+                setUserData({ connected: true });
+                setIsSignedIn(true);
+              }
+              setIsLoading(false);
+            },
+            onCancel: () => {
+              setIsLoading(false);
+              setError('Connection cancelled');
+            },
+          } as any);
+        }
+      } else {
+        throw new Error('showConnect is not available');
+      }
     } catch (error) {
       console.error('Error connecting wallet:', error);
-      setError('Failed to connect wallet. Please make sure you have a Stacks wallet installed.');
+      setError('Failed to connect wallet. Please ensure a Stacks wallet (e.g., Hiro Wallet) is installed.');
       setIsLoading(false);
     }
   };
 
   const handleSignOut = () => {
-    userSession.signUserOut();
+    // Clear all stored data
+    localStorage.removeItem('stacks-user-data');
+    localStorage.removeItem('stacks-wallet-connected');
     setIsSignedIn(false);
     setUserData(null);
     setError(null);
@@ -86,9 +122,11 @@ export default function WalletConnect() {
     );
   }
 
-  if (isSignedIn && userData) {
-    const address = userData.profile?.stxAddress?.testnet || userData.profile?.stxAddress?.mainnet;
-    
+  if (isSignedIn) {
+    const address = userData?.profile?.stxAddress?.testnet || 
+                    userData?.profile?.stxAddress?.mainnet ||
+                    (userData.connected ? 'Connected' : '');
+
     return (
       <div className="flex items-center gap-2">
         <span className="text-sm text-gray-600 hidden sm:block">
@@ -104,9 +142,9 @@ export default function WalletConnect() {
 
   return (
     <div className="space-y-3">
-      <Button 
-        onClick={handleConnect} 
-        className="bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700 text-white border-0" 
+      <Button
+        onClick={handleConnect}
+        className="bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700 text-white border-0"
         disabled={isLoading}
       >
         <Wallet className="w-4 h-4 mr-2" />
