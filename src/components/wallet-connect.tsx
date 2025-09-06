@@ -2,7 +2,16 @@ import { useState, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Wallet, LogOut, ExternalLink, AlertCircle } from 'lucide-react';
-import { AppConfig, UserSession, showConnect } from '@stacks/connect';
+import { AppConfig, UserSession } from '@stacks/connect';
+
+// Try to import showConnect, but provide fallback
+let showConnect: any = null;
+try {
+  const connectModule = require('@stacks/connect');
+  showConnect = connectModule.showConnect || connectModule.default?.showConnect;
+} catch (e) {
+  console.warn('Could not import showConnect:', e);
+}
 
 const appConfig = new AppConfig(['store_write', 'publish_data']);
 const userSession = new UserSession({ appConfig });
@@ -16,7 +25,6 @@ export default function WalletConnect() {
   useEffect(() => {
     const checkAuthStatus = async () => {
       try {
-        // Check if user is already signed in
         if (userSession.isSignInPending()) {
           const userData = await userSession.handlePendingSignIn();
           setUserData(userData);
@@ -38,21 +46,45 @@ export default function WalletConnect() {
   }, []);
 
   const checkWalletAvailability = () => {
-    // Check for Hiro Wallet
     const hasHiro = !!(window as any).StacksProvider;
-    
-    // Check for Xverse
     const hasXverse = !!(window as any).XverseProviders?.StacksProvider;
-    
-    // Check for Leather
     const hasLeather = !!(window as any).btc || !!(window as any).LeatherProvider;
-
-    console.log('Wallet detection:', { hasHiro, hasXverse, hasLeather });
 
     return {
       hasAnyWallet: hasHiro || hasXverse || hasLeather,
       wallets: { hasHiro, hasXverse, hasLeather }
     };
+  };
+
+  const connectWithHiro = async () => {
+    const stacksProvider = (window as any).StacksProvider;
+    if (!stacksProvider) throw new Error('Hiro Wallet not found');
+
+    const authResponse = await stacksProvider.transactionRequest({
+      appDetails: {
+        name: 'StacksEvents',
+        icon: `${window.location.origin}/vite.svg`,
+      },
+      userSession,
+    });
+
+    return authResponse;
+  };
+
+  const connectWithXverse = async () => {
+    const xverseProvider = (window as any).XverseProviders?.StacksProvider;
+    if (!xverseProvider) throw new Error('Xverse Wallet not found');
+
+    const authResponse = await xverseProvider.request('stx_requestAccounts', null);
+    return authResponse;
+  };
+
+  const connectWithLeather = async () => {
+    const leatherProvider = (window as any).btc;
+    if (!leatherProvider) throw new Error('Leather Wallet not found');
+
+    const response = await leatherProvider.request('stx_requestAccounts', null);
+    return response;
   };
 
   const handleConnect = async () => {
@@ -68,34 +100,60 @@ export default function WalletConnect() {
         return;
       }
 
-      // Use showConnect with proper configuration
-      showConnect({
-        appDetails: {
-          name: 'StacksEvents',
-          icon: `${window.location.origin}/vite.svg`,
-        },
-        redirectTo: window.location.origin,
-        onFinish: (authData: any) => {
-          console.log('Authentication successful:', authData);
-          
-          // The user session should now be signed in
-          if (userSession.isUserSignedIn()) {
-            const userData = userSession.loadUserData();
-            setUserData(userData);
-            setIsSignedIn(true);
-          }
-          setIsLoading(false);
-        },
-        onCancel: () => {
-          console.log('Authentication cancelled');
-          setIsLoading(false);
-        },
-        userSession: userSession,
-      });
+      // Try showConnect first if available
+      if (showConnect) {
+        try {
+          showConnect({
+            appDetails: {
+              name: 'StacksEvents',
+              icon: `${window.location.origin}/vite.svg`,
+            },
+            redirectTo: window.location.origin,
+            onFinish: (authData: any) => {
+              console.log('Authentication successful:', authData);
+              
+              if (userSession.isUserSignedIn()) {
+                const userData = userSession.loadUserData();
+                setUserData(userData);
+                setIsSignedIn(true);
+              }
+              setIsLoading(false);
+            },
+            onCancel: () => {
+              console.log('Authentication cancelled');
+              setIsLoading(false);
+            },
+            userSession: userSession,
+          });
+          return;
+        } catch (e) {
+          console.warn('showConnect failed, trying direct wallet connection:', e);
+        }
+      }
+
+      // Fallback to direct wallet connection
+      let authResponse;
+      if (walletCheck.wallets.hasHiro) {
+        authResponse = await connectWithHiro();
+      } else if (walletCheck.wallets.hasXverse) {
+        authResponse = await connectWithXverse();
+      } else if (walletCheck.wallets.hasLeather) {
+        authResponse = await connectWithLeather();
+      }
+
+      if (authResponse) {
+        // Handle successful connection
+        if (userSession.isUserSignedIn()) {
+          const userData = userSession.loadUserData();
+          setUserData(userData);
+          setIsSignedIn(true);
+        }
+      }
 
     } catch (error) {
       console.error('Error connecting wallet:', error);
       setError('Failed to connect wallet. Please try again.');
+    } finally {
       setIsLoading(false);
     }
   };
@@ -105,7 +163,6 @@ export default function WalletConnect() {
     setIsSignedIn(false);
     setUserData(null);
     setError(null);
-    // Reload to clear any cached state
     window.location.reload();
   };
 
